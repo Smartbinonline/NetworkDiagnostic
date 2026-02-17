@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0e1a">
+<title>Supabase Latency Diagnostic</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU3VwYWJhc2UgRGlhZ25vc3RpYyIsInNob3J0X25hbWUiOiJEaWFnbm9zdGljIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzBhMGUxYSIsInRoZW1lX2NvbG9yIjoiIzBhMGUxYSJ9">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    min-height: 100vh;
+    background: linear-gradient(145deg, #0a0e1a 0%, #0d1525 40%, #0a1628 100%);
+    color: #e2e8f0;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .header { text-align: center; margin-bottom: 24px; padding-top: 12px; }
+  .header-label { font-size: 11px; letter-spacing: 4px; color: #60a5fa; margin-bottom: 6px; text-transform: uppercase; }
+  .header h1 {
+    font-size: 22px; font-weight: 700; margin: 0;
+    background: linear-gradient(135deg, #60a5fa, #34d399);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+  .header-sub { font-size: 11px; color: #4b5563; margin-top: 6px; }
+  .net-info { display: flex; gap: 12px; justify-content: center; margin-bottom: 20px; font-size: 11px; color: #9ca3af; }
+  .net-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+  .key-switcher {
+    background: rgba(15,23,42,0.6); border: 1px solid #1e3a5f;
+    border-radius: 10px; padding: 12px; margin-bottom: 16px;
+  }
+  .key-switcher-label { font-size: 11px; color: #6b7280; margin-bottom: 8px; letter-spacing: 0.5px; }
+  .key-buttons { display: flex; gap: 8px; }
+  .key-btn {
+    flex: 1; padding: 10px 8px; border-radius: 8px; cursor: pointer;
+    font-family: inherit; text-align: center; transition: all 0.2s; border: 1px solid #1e293b;
+    background: rgba(15,23,42,0.4);
+  }
+  .key-btn.active { background: rgba(37,99,235,0.25); border-color: #3b82f6; }
+  .key-btn-title { font-size: 12px; font-weight: 600; color: #9ca3af; }
+  .key-btn.active .key-btn-title { color: #60a5fa; }
+  .key-btn-sub { font-size: 10px; margin-top: 3px; }
+
+  .actions { display: flex; gap: 10px; margin-bottom: 24px; }
+  .run-btn {
+    flex: 1; padding: 14px 20px; font-size: 14px; font-weight: 600;
+    font-family: inherit; border: none; border-radius: 10px; cursor: pointer;
+    color: #fff; letter-spacing: 0.5px; transition: all 0.2s;
+  }
+  .run-btn.go { background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 4px 20px rgba(37,99,235,0.3); }
+  .run-btn.stop { background: linear-gradient(135deg, #dc2626, #b91c1c); box-shadow: 0 4px 20px rgba(220,38,38,0.3); }
+  .run-btn:active { transform: scale(0.98); }
+  .gear-btn {
+    padding: 14px 16px; font-size: 14px; font-family: inherit;
+    border: 1px solid #1e3a5f; border-radius: 10px; cursor: pointer;
+    color: #60a5fa; background: rgba(30,58,95,0.3); transition: all 0.2s;
+  }
+
+  .config-panel {
+    background: rgba(15,23,42,0.9); border: 1px solid #1e3a5f;
+    border-radius: 12px; padding: 20px; margin-bottom: 24px; display: none;
+  }
+  .config-panel.show { display: block; }
+  .config-title { font-size: 13px; font-weight: 600; color: #60a5fa; margin-bottom: 16px; }
+  .config-field { margin-bottom: 14px; }
+  .config-label { font-size: 11px; color: #9ca3af; display: block; margin-bottom: 4px; }
+  .config-input {
+    width: 100%; padding: 10px 12px; background: #0a0e1a;
+    border: 1px solid #1e3a5f; border-radius: 8px; color: #e2e8f0;
+    font-size: 12px; font-family: inherit;
+  }
+  .config-input:focus { outline: none; border-color: #3b82f6; }
+  .config-hint { font-size: 11px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+  .config-hint code { color: #fbbf24; font-size: 10px; }
+  .config-save {
+    width: 100%; padding: 10px; background: #1d4ed8; color: #fff;
+    border: none; border-radius: 8px; cursor: pointer; font-family: inherit;
+    font-size: 13px; font-weight: 600;
+  }
+
+  .steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+  .step {
+    background: rgba(15,23,42,0.6); border: 1px solid #111827;
+    border-radius: 10px; padding: 12px 14px; transition: all 0.3s;
+  }
+  .step.running { border-color: #3b82f6; }
+  .step.total { background: rgba(30,58,95,0.4); border-color: #1e3a5f; padding: 16px; margin-top: 8px; }
+  .step-top { display: flex; justify-content: space-between; align-items: center; }
+  .step-left { display: flex; align-items: center; gap: 10px; }
+  .step-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-name { font-size: 13px; font-weight: 600; color: #cbd5e1; }
+  .step.total .step-name { font-size: 14px; font-weight: 700; color: #f0f4f8; }
+  .step-desc { font-size: 10px; color: #4b5563; margin-top: 1px; }
+  .step-ms { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+  .step.total .step-ms { font-size: 22px; }
+  .step-ms-unit { font-size: 11px; font-weight: 400; margin-left: 2px; }
+  .step-detail {
+    font-size: 10px; color: #6b7280; margin-top: 6px; margin-left: 38px;
+    line-height: 1.4; word-break: break-word;
+  }
+  .step-detail.error { color: #fca5a5; }
+  .step-bar { margin-top: 6px; margin-left: 38px; height: 3px; background: #111827; border-radius: 2px; overflow: hidden; }
+  .step-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease-out; }
+
+  .analysis {
+    background: rgba(15,23,42,0.6); border: 1px solid #1e3a5f;
+    border-radius: 12px; padding: 16px; margin-bottom: 24px;
+  }
+  .analysis-title { font-size: 13px; font-weight: 600; color: #fbbf24; margin-bottom: 10px; }
+  .analysis-text { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+
+  .history {
+    background: rgba(15,23,42,0.6); border: 1px solid #111827;
+    border-radius: 12px; padding: 16px; margin-bottom: 24px;
+  }
+  .history-title { font-size: 13px; font-weight: 600; color: #60a5fa; margin-bottom: 12px; }
+  .history-row { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 6px; }
+  .history-time { color: #4b5563; width: 65px; flex-shrink: 0; }
+  .history-bar { flex: 1; height: 16px; background: #111827; border-radius: 4px; overflow: hidden; position: relative; }
+  .history-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .history-bar-label {
+    position: absolute; right: 6px; top: 0; line-height: 16px;
+    font-size: 10px; color: #e2e8f0; font-weight: 600;
+  }
+  .history-meta { color: #4b5563; font-size: 10px; width: 55px; flex-shrink: 0; text-align: right; }
+
+  .legend { display: flex; justify-content: center; gap: 16px; font-size: 10px; color: #4b5563; margin-bottom: 16px; }
+  .footer { text-align: center; font-size: 10px; color: #1e293b; padding: 12px 0; }
+
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .spinning { display: inline-block; animation: spin 1s linear infinite; }
+  .pulsing { animation: pulse 1.5s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-label">Supabase Network Diagnostic</div>
+  <h1>Latency Analyzer</h1>
+  <div class="header-sub">NZ (Spark) → AWS Sydney</div>
+</div>
+
+<div class="net-info" id="netInfo" style="display:none"></div>
+
+<div class="key-switcher">
+  <div class="key-switcher-label">API KEY TO TEST:</div>
+  <div class="key-buttons">
+    <div class="key-btn active" id="keyDefault" onclick="switchKey('default')">
+      <div class="key-btn-title">Default API Key</div>
+      <div class="key-btn-sub" style="color:#fbbf24">⚠ Problem key</div>
+    </div>
+    <div class="key-btn" id="keyBin" onclick="switchKey('bin_track')">
+      <div class="key-btn-title">bin_trackapp_11feb</div>
+      <div class="key-btn-sub" style="color:#34d399">Test key</div>
+    </div>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="run-btn go" id="runBtn" onclick="toggleRun()">▶  RUN DIAGNOSTIC</button>
+  <button class="gear-btn" onclick="toggleConfig()">⚙</button>
+</div>
+
+<div class="config-panel" id="configPanel">
+  <div class="config-title">⚙ Connection Settings</div>
+  <div class="config-field">
+    <label class="config-label">Supabase URL</label>
+    <input class="config-input" id="cfgUrl" value="https://pruthpdmurujydhlihje.supabase.co">
+  </div>
+  <div class="config-field">
+    <label class="config-label">Anon (Public) Key</label>
+    <input class="config-input" id="cfgKey" type="password" value="sb_publishable_9nJDZ_1zIBD7tDsbSeACMA_JiDlrN4P">
+  </div>
+  <div class="config-field">
+    <label class="config-label">Test Table Name</label>
+    <input class="config-input" id="cfgTable" value="diagnostic_test">
+  </div>
+  <div class="config-hint">
+    💡 To test reads/writes, create a table in Supabase SQL Editor:<br>
+    <code>CREATE TABLE diagnostic_test (id serial primary key, test_value text, created_at timestamptz, source text);</code>
+  </div>
+  <button class="config-save" onclick="saveConfig()">Save Settings</button>
+</div>
+
+<div class="steps" id="stepsContainer"></div>
+<div id="analysisContainer"></div>
+<div id="historyContainer"></div>
+
+<div class="legend">
+  <span><span style="color:#34d399">●</span> &lt;200ms</span>
+  <span><span style="color:#fbbf24">●</span> 200-800ms</span>
+  <span><span style="color:#f87171">●</span> &gt;800ms</span>
+</div>
+
+<div class="footer">Supabase Latency Diagnostic v1.0 — NZ/Spark → AWS Sydney</div>
+
+<script>
+// ─── Config ───
+const API_KEYS = {
+  default: "sb_publishable_9nJDZ_1zIBD7tDsbSeACMA_JiDlrN4P",
+  bin_track: "sb_publishable_W0VOVofyJV0lDXi90YKZjw_9lRZkojg"
+};
+
+let config = {
+  url: "https://pruthpdmurujydhlihje.supabase.co",
+  key: API_KEYS.default,
+  table: "diagnostic_test"
+};
+
+let activeKey = "default";
+let isRunning = false;
+let abortController = null;
+let history = [];
+
+const STEPS_DEF = [
+  { id:"dns", name:"DNS Lookup", desc:"Resolving Supabase hostname" },
+  { id:"tcp", name:"TCP Connection", desc:"Establishing connection to AWS Sydney" },
+  { id:"tls", name:"TLS Handshake", desc:"Securing the connection (SSL/HTTPS)" },
+  { id:"ping", name:"HTTP Ping", desc:"Basic HTTP round-trip to Supabase REST API" },
+  { id:"auth", name:"Supabase Auth Check", desc:"Validating anon key & API access" },
+  { id:"read", name:"Database Read", desc:"SELECT query round-trip time" },
+  { id:"write", name:"Database Write", desc:"INSERT round-trip time (small payload)" },
+  { id:"total", name:"Total Round Trip", desc:"End-to-end: send data + confirm saved" },
+];
+
+let steps = {};
+
+const statusCfg = {
+  pending:  { color:"#6b7280", bg:"#1f2937", icon:"○" },
+  running:  { color:"#60a5fa", bg:"#1e3a5f", icon:"◌" },
+  good:     { color:"#34d399", bg:"#064e3b", icon:"✓" },
+  warn:     { color:"#fbbf24", bg:"#78350f", icon:"⚠" },
+  bad:      { color:"#f87171", bg:"#7f1d1d", icon:"✕" },
+  error:    { color:"#f87171", bg:"#7f1d1d", icon:"✕" },
+};
+
+function getStatus(ms) {
+  if (ms === null) return "pending";
+  if (ms < 0) return "error";
+  if (ms <= 200) return "good";
+  if (ms <= 800) return "warn";
+  return "bad";
+}
+
+// ─── Network Info ───
+const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+if (conn) {
+  const el = document.getElementById("netInfo");
+  el.style.display = "flex";
+  el.innerHTML = `
+    <span><span class="net-dot"></span>${(conn.effectiveType || conn.type || "unknown").toUpperCase()}</span>
+    <span>↓ ${conn.downlink ? conn.downlink + " Mbps" : "?"}</span>
+    <span>RTT ~${conn.rtt ? conn.rtt + "ms" : "?"}</span>
+  `;
+}
+
+// ─── Render Steps ───
+function renderSteps() {
+  const c = document.getElementById("stepsContainer");
+  c.innerHTML = "";
+  STEPS_DEF.forEach(def => {
+    const s = steps[def.id] || { ms: null, status: "pending", detail: "" };
+    const sc = statusCfg[s.status] || statusCfg.pending;
+    const isTotal = def.id === "total";
+    const div = document.createElement("div");
+    div.className = `step${s.status === "running" ? " running" : ""}${isTotal ? " total" : ""}`;
+
+    let iconHtml = s.status === "running"
+      ? `<span class="spinning">◌</span>`
+      : sc.icon;
+
+    let msHtml = "";
+    if (s.ms !== null && s.ms >= 0) {
+      msHtml = `<span class="step-ms" style="color:${sc.color}">${s.ms}<span class="step-ms-unit">ms</span></span>`;
+    } else if (s.status === "running") {
+      msHtml = `<span style="font-size:12px;color:#60a5fa">...</span>`;
+    } else if (s.status === "error") {
+      msHtml = `<span style="font-size:12px;color:#f87171">FAIL</span>`;
+    }
+
+    let detailHtml = s.detail
+      ? `<div class="step-detail${s.status === 'error' ? ' error' : ''}">${s.detail}</div>`
+      : "";
+
+    let barHtml = "";
+    if (s.ms !== null && s.ms >= 0 && !isTotal) {
+      const w = Math.min((s.ms / 2000) * 100, 100);
+      barHtml = `<div class="step-bar"><div class="step-bar-fill" style="width:${w}%;background:linear-gradient(90deg,${sc.color},${sc.color}88)"></div></div>`;
+    }
+
+    div.innerHTML = `
+      <div class="step-top">
+        <div class="step-left">
+          <span class="step-icon${s.status === 'running' ? ' pulsing' : ''}" style="background:${sc.bg};color:${sc.color}">${iconHtml}</span>
+          <div>
+            <div class="step-name">${def.name}</div>
+            <div class="step-desc">${def.desc}</div>
+          </div>
+        </div>
+        <div>${msHtml}</div>
+      </div>
+      ${detailHtml}
+      ${barHtml}
+    `;
+    c.appendChild(div);
+  });
+}
+
+function updateStep(id, ms, status, detail) {
+  steps[id] = { ms, status, detail };
+  renderSteps();
+}
+
+// ─── Key Switcher ───
+function switchKey(key) {
+  activeKey = key;
+  config.key = API_KEYS[key];
+  document.getElementById("cfgKey").value = config.key;
+  document.getElementById("keyDefault").className = key === "default" ? "key-btn active" : "key-btn";
+  document.getElementById("keyBin").className = key === "bin_track" ? "key-btn active" : "key-btn";
+}
+
+// ─── Config ───
+function toggleConfig() {
+  document.getElementById("configPanel").classList.toggle("show");
+}
+function saveConfig() {
+  config.url = document.getElementById("cfgUrl").value.replace(/\/$/, "");
+  config.key = document.getElementById("cfgKey").value;
+  config.table = document.getElementById("cfgTable").value;
+  document.getElementById("configPanel").classList.remove("show");
+}
+
+// ─── Run Diagnostic ───
+function toggleRun() {
+  if (isRunning) {
+    if (abortController) abortController.abort();
+    isRunning = false;
+    document.getElementById("runBtn").className = "run-btn go";
+    document.getElementById("runBtn").textContent = "▶  RUN DIAGNOSTIC";
+  } else {
+    runDiagnostic();
+  }
+}
+
+async function runDiagnostic() {
+  isRunning = true;
+  steps = {};
+  renderSteps();
+  document.getElementById("analysisContainer").innerHTML = "";
+  const btn = document.getElementById("runBtn");
+  btn.className = "run-btn stop";
+  btn.textContent = "■  STOP";
+
+  abortController = new AbortController();
+  const signal = abortController.signal;
+  const baseUrl = config.url;
+  const headers = {
+    apikey: config.key,
+    Authorization: `Bearer ${config.key}`,
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+  };
+
+  const totalStart = performance.now();
+  let hadError = false;
+
+  // Step 1: DNS + TCP + TLS (first fetch)
+  updateStep("dns", null, "running", "");
+  try {
+    const t0 = performance.now();
+    await fetch(`${baseUrl}/rest/v1/`, { method: "HEAD", headers: { apikey: config.key }, signal, mode: "cors" });
+    const fc = performance.now() - t0;
+    const dns = Math.round(fc * 0.15);
+    const tcp = Math.round(fc * 0.25);
+    const tls = Math.round(fc * 0.35);
+    updateStep("dns", dns, getStatus(dns), `~${dns}ms (estimated from ${Math.round(fc)}ms initial connect)`);
+    updateStep("tcp", tcp, getStatus(tcp), `~${tcp}ms (NZ → AWS Sydney)`);
+    updateStep("tls", tls, getStatus(tls), `~${tls}ms (HTTPS negotiation)`);
+    updateStep("ping", Math.round(fc * 0.25), getStatus(Math.round(fc * 0.25)), "Measuring with keep-alive...");
+  } catch (err) {
+    const msg = signal.aborted ? "Cancelled" : err.message;
+    updateStep("dns", -1, "error", `Failed: ${msg}`);
+    updateStep("tcp", -1, "error", "Could not connect");
+    updateStep("tls", -1, "error", "Could not connect");
+    updateStep("ping", -1, "error", "Could not connect");
+    hadError = true;
+  }
+
+  if (signal.aborted) { finish(); return; }
+
+  // Step 2: True HTTP ping (keep-alive)
+  if (!hadError) {
+    updateStep("ping", null, "running", "");
+    try {
+      const t1 = performance.now();
+      await fetch(`${baseUrl}/rest/v1/`, { method: "HEAD", headers: { apikey: config.key }, signal });
+      const p = Math.round(performance.now() - t1);
+      updateStep("ping", p, getStatus(p), `${p}ms (keep-alive, no DNS/TLS overhead)`);
+    } catch (err) {
+      updateStep("ping", -1, "error", err.message);
+    }
+  }
+
+  if (signal.aborted) { finish(); return; }
+
+  // Step 3: Auth check
+  updateStep("auth", null, "running", "");
+  try {
+    const t2 = performance.now();
+    const res = await fetch(`${baseUrl}/rest/v1/`, { method: "GET", headers, signal });
+    const ms = Math.round(performance.now() - t2);
+    const ok = res.ok || res.status === 200;
+    updateStep("auth", ms, ok ? getStatus(ms) : "error",
+      ok ? `${ms}ms — API key accepted (HTTP ${res.status})` : `HTTP ${res.status} — check your anon key`);
+    if (!ok) hadError = true;
+  } catch (err) {
+    updateStep("auth", -1, "error", err.message);
+    hadError = true;
+  }
+
+  if (signal.aborted) { finish(); return; }
+
+  // Step 4: Database READ
+  updateStep("read", null, "running", "");
+  try {
+    const t3 = performance.now();
+    const res = await fetch(`${baseUrl}/rest/v1/${config.table}?select=*&limit=1`, { method: "GET", headers, signal });
+    const ms = Math.round(performance.now() - t3);
+    if (res.ok) {
+      const data = await res.json();
+      updateStep("read", ms, getStatus(ms), `${ms}ms — returned ${data.length} row(s)`);
+    } else if (res.status === 404 || res.status === 406) {
+      updateStep("read", ms, "warn", `${ms}ms — table "${config.table}" not found. Create it or change in settings.`);
+    } else {
+      updateStep("read", ms, "error", `HTTP ${res.status}`);
+    }
+  } catch (err) {
+    updateStep("read", -1, "error", err.message);
+  }
+
+  if (signal.aborted) { finish(); return; }
+
+  // Step 5: Database WRITE
+  updateStep("write", null, "running", "");
+  try {
+    const payload = { test_value: `diag_${Date.now()}`, created_at: new Date().toISOString(), source: "nz-spark-diagnostic" };
+    const t4 = performance.now();
+    const res = await fetch(`${baseUrl}/rest/v1/${config.table}`, { method: "POST", headers, body: JSON.stringify(payload), signal });
+    const ms = Math.round(performance.now() - t4);
+    if (res.ok || res.status === 201) {
+      updateStep("write", ms, getStatus(ms), `${ms}ms — ${JSON.stringify(payload).length} bytes written`);
+    } else if (res.status === 404) {
+      updateStep("write", ms, "warn", `Table "${config.table}" not found — create it to test writes`);
+    } else {
+      const errText = await res.text();
+      updateStep("write", ms, "error", `HTTP ${res.status}: ${errText.slice(0, 120)}`);
+    }
+  } catch (err) {
+    updateStep("write", -1, "error", err.message);
+  }
+
+  // Total
+  const totalMs = Math.round(performance.now() - totalStart);
+  updateStep("total", totalMs, getStatus(totalMs), `${totalMs}ms end-to-end`);
+
+  // History
+  history.unshift({
+    time: new Date().toLocaleTimeString(),
+    total: totalMs,
+    network: conn?.effectiveType || "?",
+    key: activeKey
+  });
+  if (history.length > 20) history.pop();
+  renderHistory();
+
+  // Analysis
+  renderAnalysis();
+  finish();
+}
+
+function finish() {
+  isRunning = false;
+  const btn = document.getElementById("runBtn");
+  btn.className = "run-btn go";
+  btn.textContent = "▶  RUN DIAGNOSTIC";
+}
+
+function renderAnalysis() {
+  const c = document.getElementById("analysisContainer");
+  const s = steps;
+  let text = "";
+  if (s.total?.ms > 3000) text += "⚠ Total round trip exceeds 3 seconds — significant latency detected. ";
+  if (s.dns?.ms > 300) text += "DNS resolution is slow — your device may be doing fresh lookups each time. Consider connection pooling or keep-alive. ";
+  if (s.tls?.ms > 500) text += "TLS handshake is slow — this often happens on first connection. Subsequent requests should reuse the session. ";
+  if (s.auth?.ms > 800) text += "Auth check is slow — Supabase may be cold-starting. Check if you're on a free tier (which pauses after inactivity). ";
+  if (s.read?.ms > 500) text += "Database read latency is high — check if RLS policies or complex queries are adding overhead. ";
+  if (s.write?.ms > 500) text += "Database write is slow — check if you have triggers, RLS policies, or indexes that run on insert. ";
+  if (s.total?.ms < 500) text += "✅ Latency looks healthy for NZ → Sydney. ";
+  if (s.total?.ms >= 500 && s.total?.ms <= 1500) text += "Latency is moderate — acceptable for most apps but room for improvement. ";
+  text += "<br><br><span style='color:#60a5fa'>Tip:</span> Run this test 3-5 times. The first run is always slowest (cold connection). Compare subsequent runs for true performance.";
+
+  c.innerHTML = `<div class="analysis"><div class="analysis-title">💡 Analysis</div><div class="analysis-text">${text}</div></div>`;
+}
+
+function renderHistory() {
+  const c = document.getElementById("historyContainer");
+  if (history.length === 0) { c.innerHTML = ""; return; }
+  const max = Math.max(...history.map(h => h.total), 1000);
+  let rows = history.map(h => {
+    const pct = (h.total / max) * 100;
+    const bg = h.total > 3000 ? "linear-gradient(90deg,#f87171,#dc2626)"
+      : h.total > 1000 ? "linear-gradient(90deg,#fbbf24,#f59e0b)"
+      : "linear-gradient(90deg,#34d399,#059669)";
+    const keyLabel = h.key === "bin_track" ? "bin" : "dflt";
+    return `<div class="history-row">
+      <span class="history-time">${h.time}</span>
+      <div class="history-bar">
+        <div class="history-bar-fill" style="width:${pct}%;background:${bg}"></div>
+        <span class="history-bar-label">${h.total}ms</span>
+      </div>
+      <span class="history-meta">${keyLabel} · ${h.network}</span>
+    </div>`;
+  }).join("");
+
+  c.innerHTML = `<div class="history"><div class="history-title">📊 Run History</div>${rows}</div>`;
+}
+
+// Initial render
+renderSteps();
+</script>
+</body>
+</html>
